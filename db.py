@@ -342,7 +342,7 @@ def get_due_reviews(limit: int = 3) -> List[sqlite3.Row]:
             due.append((row, base_date))
 
     due.sort(key=lambda item: item[1])
-    limit = max(1, min(limit, 3))
+    limit = max(1, min(limit, 5))
     if due:
         return [row for row, _ in due[:limit]]
     return []
