@@ -133,7 +133,7 @@ h1 {
 .shots {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 26px;
+  gap: 32px;
 }
 
 figure {
@@ -145,9 +145,14 @@ figure {
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--accent-soft);
-  min-height: 260px;
+  min-height: 420px;
   display: grid;
   place-items: center;
+}
+
+.shot img {
+  width: 100%;
+  height: auto;
 }
 
 .shot img {
