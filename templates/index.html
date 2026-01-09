@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LeetCode Notes</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="nav">
+        <div class="brand">
+          <div class="brand__badge">LC</div>
+          <div>
+            <div class="brand__title">LeetCode Notes</div>
+            <div class="brand__caption">Local review studio</div>
+          </div>
+        </div>
+        <nav class="nav__menu">
+          <button class="nav__item is-active" data-view="review">Daily Review</button>
+          <button class="nav__item" data-view="add">Add Entry</button>
+          <button class="nav__item" data-view="library">Library</button>
+          <button class="nav__item" data-view="tags">Tags</button>
+        </nav>
+        <div class="nav__hint">Everything stays local. Auto-backup included.</div>
+      </aside>
+
+      <main class="main">
+        <section class="panel view" id="view-review">
+          <header class="panel__header">
+            <div>
+              <h1>Daily Review</h1>
+              <p class="muted">Focus on 1–3 problems that matter most today.</p>
+            </div>
+            <div class="header-actions">
+              <button class="ghost" id="review-refresh">Refresh</button>
+            </div>
+          </header>
+          <div class="review-grid" id="review-list"></div>
+        </section>
+
+        <section class="panel view is-hidden" id="view-add">
+          <header class="panel__header">
+            <div>
+              <h1>Add Entry</h1>
+              <p class="muted">Capture the reasoning while it is fresh.</p>
+            </div>
+          </header>
+          <form class="form" id="add-form">
+            <div class="form__row">
+              <div class="field">
+                <label>LC #</label>
+                <input name="lc_num" placeholder="1" />
+              </div>
+              <div class="field wide">
+                <label>Title</label>
+                <input name="title" placeholder="Two Sum" />
+              </div>
+            </div>
+
+            <div class="form__row">
+              <div class="field wide">
+                <label>Tags</label>
+                <div class="tag-select" id="add-tags"></div>
+              </div>
+              <div class="field">
+                <label>New tag</label>
+                <input name="new_tag" placeholder="Monotonic Stack" />
+              </div>
+              <div class="field">
+                <label>Importance</label>
+                <select name="importance">
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Notes</label>
+              <textarea name="notes" rows="10" placeholder="Key insight, pitfalls, time complexity..."></textarea>
+            </div>
+
+            <div class="form__actions">
+              <span class="status" id="add-status"></span>
+              <button type="submit" class="primary">Save Entry</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel view is-hidden" id="view-library">
+          <header class="panel__header">
+            <div>
+              <h1>Library</h1>
+              <p class="muted">Search, filter, and edit your knowledge base.</p>
+            </div>
+          </header>
+          <div class="toolbar">
+            <input id="search-input" placeholder="Search by #, title, or tag" />
+            <div class="tag-select" id="search-tags"></div>
+            <button class="primary" id="search-button">Search</button>
+          </div>
+          <div class="library">
+            <div class="library__list" id="library-list"></div>
+            <div class="library__detail" id="library-detail">
+              <div class="empty">Select a problem to view details.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel view is-hidden" id="view-tags">
+          <header class="panel__header">
+            <div>
+              <h1>Tags</h1>
+              <p class="muted">Keep your tags clean and intentional.</p>
+            </div>
+          </header>
+          <div class="tags" id="tag-list"></div>
+          <div class="tag-add">
+            <input id="tag-new" placeholder="Add a new tag" />
+            <button class="primary" id="tag-add">Add Tag</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
