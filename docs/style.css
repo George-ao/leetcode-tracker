@@ -146,13 +146,13 @@ figure {
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--accent-soft);
-  min-height: 460px;
+  min-height: 320px;
   display: grid;
   place-items: center;
 }
 
 .shot img {
-  width: 100%;
+  width: 66%;
   height: auto;
 }
 
