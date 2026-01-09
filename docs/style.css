@@ -132,8 +132,8 @@ h1 {
 
 .shots {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 20px;
+  grid-template-columns: 1fr;
+  gap: 26px;
 }
 
 figure {
@@ -145,7 +145,7 @@ figure {
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--accent-soft);
-  min-height: 180px;
+  min-height: 260px;
   display: grid;
   place-items: center;
 }
