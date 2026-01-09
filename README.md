@@ -8,7 +8,7 @@ A local LeetCode tracker that is easy to use and built for note-first review.
 - **Local & safe**: everything stays on your machine with local backups
 - **Multi-tag search**: filter by tags to find past insights fast
 
-## Local setup
+## How to Use
 ```bash
 python -m venv .venv
 source .venv/bin/activate
