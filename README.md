@@ -1,6 +1,6 @@
 # Smart LeetCode Tracker
 
-A local LeetCode tracker that is easy to use and built for note-first review.
+A local LeetCode tracker that starts in seconds and keeps your reviews effortless.
 
 ## Key features
 - **Automatic review reminders**: daily reminder
@@ -15,6 +15,24 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python web_app.py
 ```
+<!-- Optional: Automator app (macOS)
+1) Open Automator → New Document → Application
+2) Add “Run Shell Script” action (Shell: /bin/zsh)
+3) Paste this script:
+   #!/bin/zsh
+   cd /Users/yuyi/Documents/code/lc_tracker
+   source .venv/bin/activate
+   python web_app.py &
+   sleep 1
+   open http://127.0.0.1:5123
+4) Save as “LeetCode Notes.app”
+-->
+<!-- Optional macOS app wrapper:
+1) Install: pip install py2app
+2) Create setup.py with a basic py2app config
+3) Build: python setup.py py2app
+4) Launch the .app from dist/
+-->
 Then open `http://127.0.0.1:5123`.
 
 ## Data location
