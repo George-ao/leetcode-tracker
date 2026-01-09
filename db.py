@@ -324,7 +324,7 @@ def get_attempts(problem_id: int) -> List[sqlite3.Row]:
 def get_due_reviews(limit: int = 3) -> List[sqlite3.Row]:
     problems = get_problems()
     today = date.today()
-    due: List[sqlite3.Row] = []
+    due: List[tuple[sqlite3.Row, date]] = []
 
     for row in problems:
         base_date_str = row["last_review_at"] or row["last_attempt_at"] or row["created_at"]
@@ -339,14 +339,12 @@ def get_due_reviews(limit: int = 3) -> List[sqlite3.Row]:
         delta_days = (today - base_date).days
 
         if delta_days >= required_days:
-            due.append(row)
+            due.append((row, base_date))
 
-    due.sort(key=lambda r: (r["last_review_at"] or "", r["last_attempt_at"] or ""))
+    due.sort(key=lambda item: item[1])
     limit = max(1, min(limit, 3))
     if due:
-        return due[:limit]
-    if problems:
-        return problems[:1]
+        return [row for row, _ in due[:limit]]
     return []
 
 
