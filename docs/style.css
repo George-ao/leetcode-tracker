@@ -131,13 +131,14 @@ h1 {
 }
 
 .shots {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
 }
 
 figure {
   margin: 0;
+  width: 100%;
 }
 
 .shot {
@@ -145,7 +146,7 @@ figure {
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--accent-soft);
-  min-height: 420px;
+  min-height: 520px;
   display: grid;
   place-items: center;
 }
