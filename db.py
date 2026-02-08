@@ -407,6 +407,107 @@ def get_due_reviews(limit: int = 3) -> List[sqlite3.Row]:
     return []
 
 
+def get_dashboard_summary() -> dict:
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS count FROM problems")
+    total_problems = int(cur.fetchone()["count"] or 0)
+    cur.execute("SELECT COUNT(*) AS count FROM attempts")
+    total_attempts = int(cur.fetchone()["count"] or 0)
+    cur.execute("SELECT COALESCE(SUM(review_count), 0) AS count FROM problems")
+    total_reviews = int(cur.fetchone()["count"] or 0)
+    cur.execute("SELECT MAX(attempt_at) AS value FROM attempts")
+    last_attempt_at = cur.fetchone()["value"]
+    cur.execute("SELECT MAX(last_review_at) AS value FROM problems")
+    last_review_at = cur.fetchone()["value"]
+    cur.execute("SELECT COUNT(*) AS count FROM attempts WHERE attempt_at >= date('now', '-30 day')")
+    attempts_30d = int(cur.fetchone()["count"] or 0)
+    cur.execute("SELECT COUNT(DISTINCT attempt_at) AS count FROM attempts WHERE attempt_at >= date('now', '-30 day')")
+    active_days_30d = int(cur.fetchone()["count"] or 0)
+    cur.execute("SELECT COUNT(*) AS count FROM problems WHERE last_attempt_at >= date('now', '-30 day')")
+    touched_30d = int(cur.fetchone()["count"] or 0)
+
+    cur.execute("SELECT frequency, COUNT(*) AS count FROM problems GROUP BY frequency")
+    importance_counts = {"Low": 0, "Medium": 0, "High": 0}
+    for row in cur.fetchall():
+        importance = _normalize_importance(row["frequency"])
+        importance_counts[importance] = importance_counts.get(importance, 0) + int(row["count"] or 0)
+
+    cur.execute(
+        """
+        SELECT t.name AS name, COUNT(DISTINCT pt.problem_id) AS count
+        FROM tags t
+        JOIN problem_tags pt ON t.id = pt.tag_id
+        GROUP BY t.id
+        ORDER BY count DESC, t.name COLLATE NOCASE ASC
+        LIMIT 5
+        """
+    )
+    top_tags = [{"name": row["name"], "count": int(row["count"] or 0)} for row in cur.fetchall()]
+
+    cur.execute(
+        """
+        SELECT frequency, created_at, last_attempt_at, last_review_at, review_count, snooze_until
+        FROM problems
+        """
+    )
+    problem_rows = cur.fetchall()
+    conn.close()
+
+    today = date.today()
+    due_now = 0
+    due_soon = 0
+    for row in problem_rows:
+        snooze_until = row["snooze_until"]
+        if snooze_until:
+            try:
+                snooze_date = datetime.strptime(snooze_until, "%Y-%m-%d").date()
+            except ValueError:
+                snooze_date = None
+            if snooze_date and snooze_date > today:
+                continue
+        base_date_str = row["last_review_at"] or row["last_attempt_at"] or row["created_at"]
+        try:
+            base_date = datetime.strptime(base_date_str, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        importance = _normalize_importance(row["frequency"])
+        intervals = IMPORTANCE_INTERVALS.get(importance, IMPORTANCE_INTERVALS["Medium"])
+        stage = min(int(row["review_count"] or 0), len(intervals) - 1)
+        required_days = intervals[stage]
+        delta_days = (today - base_date).days
+        if delta_days >= required_days:
+            due_now += 1
+        else:
+            remaining = required_days - delta_days
+            if remaining <= 7:
+                due_soon += 1
+
+    coverage_percent = int(round((touched_30d / total_problems) * 100)) if total_problems else 0
+
+    return {
+        "totals": {
+            "problems": total_problems,
+            "attempts": total_attempts,
+            "reviews": total_reviews,
+        },
+        "due": {"now": due_now, "soon": due_soon},
+        "activity": {
+            "last_attempt_at": last_attempt_at,
+            "last_review_at": last_review_at,
+            "attempts_30d": attempts_30d,
+            "active_days_30d": active_days_30d,
+            "coverage_30d": {
+                "count": touched_30d,
+                "total": total_problems,
+                "percent": coverage_percent,
+            },
+        },
+        "importance": importance_counts,
+        "top_tags": top_tags,
+    }
+
+
 def update_attempt(attempt_id: int, notes: str) -> None:
     conn = _connect()
     cur = conn.cursor()

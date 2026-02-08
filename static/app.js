@@ -13,6 +13,7 @@ const searchButton = document.getElementById('search-button');
 const sortSelect = document.getElementById('sort-select');
 const libraryList = document.getElementById('library-list');
 const libraryDetail = document.getElementById('library-detail');
+const dashboardContainer = document.getElementById('dashboard');
 
 const tagList = document.getElementById('tag-list');
 const tagNew = document.getElementById('tag-new');
@@ -51,6 +52,9 @@ function setView(viewId) {
   navButtons.forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.view === viewId);
   });
+  if (viewId === 'dashboard') {
+    loadDashboard();
+  }
 }
 
 function api(url, options = {}) {
@@ -715,6 +719,114 @@ function renderReview(reviews) {
     }
   });
   reviewList.appendChild(card);
+}
+
+function renderDashboard(data) {
+  if (!dashboardContainer) return;
+  if (!data || !data.totals) {
+    dashboardContainer.innerHTML = '<div class="empty">No data yet.</div>';
+    return;
+  }
+  const totals = data.totals || {};
+  const activity = data.activity || {};
+  const coverage = activity.coverage_30d || { count: 0, total: 0, percent: 0 };
+  const importance = data.importance || {};
+  const topTags = data.top_tags || [];
+  const coverageText = coverage.total ? `${coverage.count}/${coverage.total} (${coverage.percent}%)` : '—';
+
+  const stats = [
+    { label: 'Total problems', value: totals.problems ?? 0 },
+    { label: 'Total attempts', value: totals.attempts ?? 0 },
+    { label: 'Total reviews', value: totals.reviews ?? 0 },
+    { label: 'Active days', value: activity.active_days_30d ?? 0, hint: 'last 30d' },
+  ];
+
+  const importanceItems = [
+    { label: 'High', count: importance.High ?? 0 },
+    { label: 'Medium', count: importance.Medium ?? 0 },
+    { label: 'Low', count: importance.Low ?? 0 },
+  ];
+
+  const barRows = (items) => {
+    const max = Math.max(...items.map((item) => item.count), 1);
+    return items
+      .map((item) => {
+        const width = Math.round((item.count / max) * 100);
+        return `
+          <div class="bar-row">
+            <div class="bar-label">${item.label}</div>
+            <div class="bar-track"><span style="width: ${width}%"></span></div>
+            <div class="bar-value">${item.count}</div>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const tagRows = topTags.length
+    ? barRows(topTags.map((tag) => ({ label: tag.name, count: tag.count })))
+    : '<div class="empty">No tags yet.</div>';
+
+  dashboardContainer.innerHTML = `
+    <div class="dashboard-grid">
+      ${stats
+        .map(
+          (stat) => `
+            <div class="stat-card">
+              <div class="stat-label">${stat.label}</div>
+              <div class="stat-value">${stat.value}</div>
+              ${stat.hint ? `<div class="stat-hint">${stat.hint}</div>` : ''}
+            </div>
+          `,
+        )
+        .join('')}
+    </div>
+    <div class="dashboard-sections">
+      <div class="dashboard-section">
+        <h3>Activity</h3>
+        <div class="dashboard-list">
+          <div class="dashboard-row">
+            <span>Last attempt</span>
+            <strong>${activity.last_attempt_at || '—'}</strong>
+          </div>
+          <div class="dashboard-row">
+            <span>Last review</span>
+            <strong>${activity.last_review_at || '—'}</strong>
+          </div>
+          <div class="dashboard-row">
+            <span>Attempts (30d)</span>
+            <strong>${activity.attempts_30d ?? 0}</strong>
+          </div>
+          <div class="dashboard-row">
+            <span>Touched (30d)</span>
+            <strong>${coverageText}</strong>
+          </div>
+        </div>
+      </div>
+      <div class="dashboard-section">
+        <h3>Importance mix</h3>
+        <div class="bar-list">
+          ${barRows(importanceItems)}
+        </div>
+      </div>
+      <div class="dashboard-section">
+        <h3>Top tags</h3>
+        <div class="bar-list">
+          ${tagRows}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function loadDashboard() {
+  if (!dashboardContainer) return;
+  dashboardContainer.innerHTML = '<div class="empty">Loading dashboard...</div>';
+  api('/api/dashboard')
+    .then((data) => renderDashboard(data))
+    .catch(() => {
+      dashboardContainer.innerHTML = '<div class="empty">Unable to load dashboard.</div>';
+    });
 }
 
 function renderLibraryList(problems) {

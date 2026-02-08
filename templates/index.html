@@ -18,6 +18,7 @@
         </div>
         <nav class="nav__menu">
           <button class="nav__item is-active" data-view="review">Daily Review</button>
+          <button class="nav__item" data-view="dashboard">Dashboard</button>
           <button class="nav__item" data-view="add">Add Entry</button>
           <button class="nav__item" data-view="library">Library</button>
           <button class="nav__item" data-view="tags">Tags</button>
@@ -114,6 +115,18 @@
             <div class="library__detail" id="library-detail">
               <div class="empty">Select a problem to view details.</div>
             </div>
+          </div>
+        </section>
+
+        <section class="panel view is-hidden" id="view-dashboard">
+          <header class="panel__header">
+            <div>
+              <h1>Dashboard</h1>
+              <p class="muted">A quick snapshot of progress and review load.</p>
+            </div>
+          </header>
+          <div class="dashboard" id="dashboard">
+            <div class="empty">Loading dashboard...</div>
           </div>
         </section>
 

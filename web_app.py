@@ -13,6 +13,7 @@ from db import (
     delete_problem,
     get_attempts,
     get_due_reviews,
+    get_dashboard_summary,
     get_problem_detail,
     get_problems,
     get_tags,
@@ -144,6 +145,11 @@ def api_reviews():
     limit = int(request.args.get("limit", 3))
     rows = get_due_reviews(limit)
     return jsonify({"reviews": [_problem_payload(r) for r in rows]})
+
+
+@app.get("/api/dashboard")
+def api_dashboard():
+    return jsonify(get_dashboard_summary())
 
 
 @app.post("/api/reviews/<int:problem_id>")
