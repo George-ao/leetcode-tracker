@@ -308,6 +308,13 @@ function enhanceMarkdownBlocks(container) {
   });
 }
 
+function typesetMath(container) {
+  if (!window.MathJax || typeof window.MathJax.typesetPromise !== 'function') {
+    return;
+  }
+  window.MathJax.typesetPromise([container]).catch(() => {});
+}
+
 function loadSortPreference() {
   try {
     const stored = localStorage.getItem(SORT_STORAGE_KEY);
@@ -386,12 +393,42 @@ function getImportanceRank(importance) {
 }
 
 function getDueScore(item) {
+  if (item.snooze_until) {
+    const snoozeDays = getDaysSince(item.snooze_until);
+    if (snoozeDays < 0) {
+      return -9999;
+    }
+  }
   const intervals = REVIEW_INTERVALS[item.importance] || REVIEW_INTERVALS.Medium;
   const stage = Math.min(item.review_count || 0, intervals.length - 1);
   const requiredDays = intervals[stage];
   const baseDate = item.last_review_at || item.last_attempt_at || item.created_at;
   const deltaDays = getDaysSince(baseDate);
   return deltaDays - requiredDays;
+}
+
+function formatDate(value) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getTomorrowDate() {
+  const value = new Date();
+  value.setDate(value.getDate() + 1);
+  return formatDate(value);
+}
+
+function getUpcomingSaturdayDate() {
+  const value = new Date();
+  const day = value.getDay();
+  let daysUntil = 6 - day;
+  if (daysUntil <= 0) {
+    daysUntil += 7;
+  }
+  value.setDate(value.getDate() + daysUntil);
+  return formatDate(value);
 }
 
 function getSortedProblems() {
@@ -471,28 +508,43 @@ function renderReview(reviews) {
     reviewList.innerHTML = '<div class="empty">Nothing due today.</div>';
     return;
   }
-  reviews.forEach((item) => {
-    const card = document.createElement('div');
-    card.className = 'review-card';
-    const days = item.days_since ?? '-';
-    const tagText = item.tags?.length ? item.tags.join(', ') : 'No Tag';
-    card.innerHTML = `
-      <div>
-        <h3>${item.lc_num}. ${item.title}</h3>
-        <div class="review-meta">${tagText} | Importance ${item.importance} | Attempts ${item.attempt_count} | Reviews ${item.review_count} | Days since ${days}</div>
-      </div>
-      <button class="primary small">Mark Reviewed</button>
-    `;
-    const button = card.querySelector('button');
-    button.addEventListener('click', () => {
-      button.disabled = true;
-      markReviewed(item.id).then(() => {
-        card.classList.add('is-done');
-        button.textContent = 'Done ✓';
-      });
+  const item = reviews[0];
+  const card = document.createElement('div');
+  card.className = 'review-card';
+  const days = item.days_since ?? '-';
+  const tagText = item.tags?.length ? item.tags.join(', ') : 'No Tag';
+  card.innerHTML = `
+    <div>
+      <h3>${item.lc_num}. ${item.title}</h3>
+      <div class="review-meta">${tagText} | Importance ${item.importance} | Attempts ${item.attempt_count} | Reviews ${item.review_count} | Days since ${days}</div>
+    </div>
+    <div class="review-card__actions">
+      <button class="primary small" type="button">Mark Reviewed</button>
+      <button class="ghost small" type="button">Snooze to tomorrow</button>
+      <button class="ghost small" type="button">Snooze to weekend</button>
+    </div>
+  `;
+  const buttons = card.querySelectorAll('button');
+  const reviewBtn = buttons[0];
+  const snoozeTomorrowBtn = buttons[1];
+  const snoozeWeekendBtn = buttons[2];
+  const setDisabled = (value) => {
+    buttons.forEach((btn) => {
+      btn.disabled = value;
     });
-    reviewList.appendChild(card);
-  });
+  };
+  const runAction = (promise) => {
+    setDisabled(true);
+    promise.then(loadReview).catch(() => setDisabled(false));
+  };
+  reviewBtn.addEventListener('click', () => runAction(markReviewed(item.id)));
+  snoozeTomorrowBtn.addEventListener('click', () =>
+    runAction(snoozeReview(item.id, getTomorrowDate())),
+  );
+  snoozeWeekendBtn.addEventListener('click', () =>
+    runAction(snoozeReview(item.id, getUpcomingSaturdayDate())),
+  );
+  reviewList.appendChild(card);
 }
 
 function renderLibraryList(problems) {
@@ -590,6 +642,7 @@ function renderProblemDetail(detail, attempts) {
     const textarea = card.querySelector('.note-editor');
     const preview = card.querySelector('.note-preview');
     enhanceMarkdownBlocks(preview);
+    typesetMath(preview);
 
     editBtn.addEventListener('click', () => {
       textarea.classList.remove('is-hidden');
@@ -614,7 +667,7 @@ function loadTags() {
 }
 
 function loadReview() {
-  return api('/api/reviews').then((data) => renderReview(data.reviews || []));
+  return api('/api/reviews?limit=1').then((data) => renderReview(data.reviews || []));
 }
 
 function getSelectedTags(container) {
@@ -653,6 +706,13 @@ function loadProblemDetail(problemId) {
 
 function markReviewed(problemId) {
   return api(`/api/reviews/${problemId}`, { method: 'POST' });
+}
+
+function snoozeReview(problemId, until) {
+  return api(`/api/reviews/${problemId}/snooze`, {
+    method: 'POST',
+    body: JSON.stringify({ until }),
+  });
 }
 
 function addEntry(formData) {

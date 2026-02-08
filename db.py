@@ -59,6 +59,7 @@ def init_db() -> None:
             created_at TEXT NOT NULL,
             last_attempt_at TEXT,
             last_review_at TEXT,
+            snooze_until TEXT,
             review_count INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (tag_id) REFERENCES tags (id)
         )
@@ -87,6 +88,12 @@ def init_db() -> None:
         """
     )
     conn.commit()
+
+    cur.execute("PRAGMA table_info(problems)")
+    columns = {row["name"] for row in cur.fetchall()}
+    if "snooze_until" not in columns:
+        cur.execute("ALTER TABLE problems ADD COLUMN snooze_until TEXT")
+        conn.commit()
 
     for tag in DEFAULT_TAGS:
         cur.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
@@ -179,7 +186,7 @@ def add_attempt(
         cur.execute(
             """
             UPDATE problems
-            SET title = ?, tag_id = ?, frequency = ?, last_attempt_at = ?, last_review_at = ?
+            SET title = ?, tag_id = ?, frequency = ?, last_attempt_at = ?, last_review_at = ?, snooze_until = NULL
             WHERE id = ?
             """,
             (title.strip(), tag_id, frequency or "Medium", attempt_at, attempt_at, problem_id),
@@ -187,10 +194,10 @@ def add_attempt(
     else:
         cur.execute(
             """
-            INSERT INTO problems (lc_num, title, tag_id, frequency, created_at, last_attempt_at, last_review_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO problems (lc_num, title, tag_id, frequency, created_at, last_attempt_at, last_review_at, snooze_until)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (lc_num.strip(), title.strip(), tag_id, frequency or "Medium", attempt_at, attempt_at, attempt_at),
+            (lc_num.strip(), title.strip(), tag_id, frequency or "Medium", attempt_at, attempt_at, attempt_at, None),
         )
         problem_id = int(cur.lastrowid)
 
@@ -221,10 +228,22 @@ def mark_review(problem_id: int) -> None:
     cur.execute(
         """
         UPDATE problems
-        SET last_review_at = ?, review_count = review_count + 1
+        SET last_review_at = ?, review_count = review_count + 1, snooze_until = NULL
         WHERE id = ?
         """,
         (today, int(problem_id)),
+    )
+    conn.commit()
+    conn.close()
+    backup_db()
+
+
+def snooze_problem(problem_id: int, until: str) -> None:
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE problems SET snooze_until = ? WHERE id = ?",
+        (until, int(problem_id)),
     )
     conn.commit()
     conn.close()
@@ -243,6 +262,7 @@ def get_problems(search: str = "", tags: List[str] | None = None) -> List[sqlite
             p.created_at,
             p.last_attempt_at,
             p.last_review_at,
+            p.snooze_until,
             p.review_count,
             GROUP_CONCAT(DISTINCT t.name) AS tags,
             COUNT(DISTINCT a.id) AS attempt_count
@@ -289,6 +309,7 @@ def get_problem_detail(problem_id: int) -> Optional[sqlite3.Row]:
             p.created_at,
             p.last_attempt_at,
             p.last_review_at,
+            p.snooze_until,
             p.review_count,
             GROUP_CONCAT(DISTINCT t.name) AS tags
         FROM problems p
@@ -327,6 +348,14 @@ def get_due_reviews(limit: int = 3) -> List[sqlite3.Row]:
     due: List[tuple[sqlite3.Row, date]] = []
 
     for row in problems:
+        snooze_until = row["snooze_until"]
+        if snooze_until:
+            try:
+                snooze_date = datetime.strptime(snooze_until, "%Y-%m-%d").date()
+            except ValueError:
+                snooze_date = None
+            if snooze_date and snooze_date > today:
+                continue
         base_date_str = row["last_review_at"] or row["last_attempt_at"] or row["created_at"]
         try:
             base_date = datetime.strptime(base_date_str, "%Y-%m-%d").date()

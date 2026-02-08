@@ -19,6 +19,7 @@ from db import (
     init_db,
     mark_review,
     rename_tag,
+    snooze_problem,
     update_attempt,
 )
 
@@ -48,6 +49,7 @@ def _problem_payload(row) -> Dict[str, Any]:
         "created_at": row["created_at"],
         "last_attempt_at": row["last_attempt_at"],
         "last_review_at": row["last_review_at"],
+        "snooze_until": row["snooze_until"],
         "review_count": row["review_count"],
         "attempt_count": row["attempt_count"],
         "days_since": _days_since(row["last_attempt_at"]),
@@ -131,6 +133,20 @@ def api_reviews():
 @app.post("/api/reviews/<int:problem_id>")
 def api_mark_review(problem_id: int):
     mark_review(problem_id)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/reviews/<int:problem_id>/snooze")
+def api_snooze_review(problem_id: int):
+    data = request.get_json(force=True)
+    until = (data.get("until") or "").strip()
+    if not until:
+        return jsonify({"ok": False, "error": "Date required"}), 400
+    try:
+        datetime.strptime(until, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"ok": False, "error": "Invalid date"}), 400
+    snooze_problem(problem_id, until)
     return jsonify({"ok": True})
 
 

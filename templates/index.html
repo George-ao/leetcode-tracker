@@ -30,7 +30,7 @@
           <header class="panel__header">
             <div>
               <h1>Daily Review</h1>
-              <p class="muted">Focus on 1–3 problems that matter most today.</p>
+              <p class="muted">Focus on one problem at a time.</p>
             </div>
             <div class="header-actions">
               <button class="ghost" id="review-refresh">Refresh</button>
@@ -132,6 +132,22 @@
       </main>
     </div>
 
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']],
+          processEscapes: true,
+        },
+        options: {
+          skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        },
+        startup: {
+          typeset: false,
+        },
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

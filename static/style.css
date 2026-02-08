@@ -163,6 +163,12 @@ h1 {
   gap: 12px;
 }
 
+.review-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .review-card.is-done {
   border: 1px solid var(--accent);
   background: #e3f4ef;
