@@ -20,7 +20,10 @@ const tagAdd = document.getElementById('tag-add');
 
 const SORT_STORAGE_KEY = 'lc_tracker_sort';
 const PIN_STORAGE_KEY = 'lc_tracker_pins';
+const REVIEW_PROGRESS_KEY = 'lc_tracker_review_progress';
+const DAILY_REVIEW_LIMIT = 1;
 const REVIEW_INTERVALS = {
+  Low: [4, 8, 15, 30, 60, 120, 180],
   Medium: [2, 4, 7, 15, 30, 60, 90],
   High: [1, 2, 4, 7, 15, 30, 60],
 };
@@ -32,10 +35,14 @@ const state = {
   searchTags: [],
   sortBy: 'last_attempt',
   pinnedIds: new Set(),
+  reviewNotes: new Map(),
+  reviewAllowExtra: false,
+  reviewDay: null,
 };
 
 state.sortBy = loadSortPreference();
 state.pinnedIds = loadPinnedIds();
+state.reviewDay = formatDate(new Date());
 
 function setView(viewId) {
   views.forEach((view) => {
@@ -389,7 +396,8 @@ function getDaysSince(value) {
 function getImportanceRank(importance) {
   if (importance === 'High') return 2;
   if (importance === 'Medium') return 1;
-  return 0;
+  if (importance === 'Low') return 0;
+  return 1;
 }
 
 function getDueScore(item) {
@@ -405,6 +413,30 @@ function getDueScore(item) {
   const baseDate = item.last_review_at || item.last_attempt_at || item.created_at;
   const deltaDays = getDaysSince(baseDate);
   return deltaDays - requiredDays;
+}
+
+function getBaseDateInfo(item) {
+  if (item.last_review_at) {
+    return { label: 'last review', date: item.last_review_at };
+  }
+  if (item.last_attempt_at) {
+    return { label: 'last attempt', date: item.last_attempt_at };
+  }
+  return { label: 'created', date: item.created_at };
+}
+
+function getReviewNotes(problemId) {
+  if (state.reviewNotes.has(problemId)) {
+    return Promise.resolve(state.reviewNotes.get(problemId));
+  }
+  return api(`/api/problems/${problemId}`).then((data) => {
+    const attempt = data.attempts?.[0] || null;
+    const payload = attempt
+      ? { html: attempt.notes_html || '', attemptAt: attempt.attempt_at }
+      : null;
+    state.reviewNotes.set(problemId, payload);
+    return payload;
+  });
 }
 
 function formatDate(value) {
@@ -429,6 +461,72 @@ function getUpcomingSaturdayDate() {
   }
   value.setDate(value.getDate() + daysUntil);
   return formatDate(value);
+}
+
+function getReviewProgress() {
+  const today = formatDate(new Date());
+  try {
+    const raw = localStorage.getItem(REVIEW_PROGRESS_KEY);
+    if (!raw) {
+      return { date: today, count: 0 };
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed.date !== today) {
+      return { date: today, count: 0 };
+    }
+    const count = Number(parsed.count);
+    return { date: today, count: Number.isFinite(count) ? count : 0 };
+  } catch (err) {
+    return { date: today, count: 0 };
+  }
+}
+
+function saveReviewProgress(progress) {
+  try {
+    localStorage.setItem(REVIEW_PROGRESS_KEY, JSON.stringify(progress));
+  } catch (err) {
+    // Ignore storage failures.
+  }
+}
+
+function incrementReviewCount() {
+  const progress = getReviewProgress();
+  progress.count += 1;
+  saveReviewProgress(progress);
+  return progress;
+}
+
+function hasReachedReviewLimit() {
+  const progress = getReviewProgress();
+  if (state.reviewDay !== progress.date) {
+    state.reviewDay = progress.date;
+    state.reviewAllowExtra = false;
+  }
+  return !state.reviewAllowExtra && progress.count >= DAILY_REVIEW_LIMIT;
+}
+
+function renderReviewComplete() {
+  const progress = getReviewProgress();
+  reviewList.innerHTML = `
+    <div class="review-card review-card--done">
+      <div>
+        <h3>Daily review complete</h3>
+        <div class="review-meta">${progress.count}/${DAILY_REVIEW_LIMIT} done today.</div>
+      </div>
+      <div class="review-card__actions">
+        <div class="review-card__row">
+          <button class="ghost small review-more" type="button">Review another</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const button = reviewList.querySelector('.review-more');
+  if (button) {
+    button.addEventListener('click', () => {
+      state.reviewAllowExtra = true;
+      loadReview();
+    });
+  }
 }
 
 function getSortedProblems() {
@@ -511,39 +609,111 @@ function renderReview(reviews) {
   const item = reviews[0];
   const card = document.createElement('div');
   card.className = 'review-card';
-  const days = item.days_since ?? '-';
   const tagText = item.tags?.length ? item.tags.join(', ') : 'No Tag';
+  const baseInfo = getBaseDateInfo(item);
+  const lastDays = getDaysSince(baseInfo.date);
+  const lastLabel = baseInfo.label === 'created' ? 'Added' : baseInfo.label === 'last attempt' ? 'Last attempt' : 'Last review';
+  const attemptLabel = item.attempt_count === 1 ? 'attempt' : 'attempts';
+  const reviewLabel = item.review_count === 1 ? 'review' : 'reviews';
+  const countsText = `${item.attempt_count} ${attemptLabel} · ${item.review_count} ${reviewLabel}`;
+  const metaText = `${item.importance} · ${countsText} · ${lastLabel} ${lastDays}d`;
   card.innerHTML = `
     <div>
       <h3>${item.lc_num}. ${item.title}</h3>
-      <div class="review-meta">${tagText} | Importance ${item.importance} | Attempts ${item.attempt_count} | Reviews ${item.review_count} | Days since ${days}</div>
+      <div class="review-meta">${tagText}</div>
+      <div class="review-meta">${metaText}</div>
     </div>
     <div class="review-card__actions">
-      <button class="primary small" type="button">Mark Reviewed</button>
-      <button class="ghost small" type="button">Snooze to tomorrow</button>
-      <button class="ghost small" type="button">Snooze to weekend</button>
+      <div class="review-card__row">
+        <button class="ghost small review-grade" data-grade="again" type="button">Again</button>
+        <button class="ghost small review-grade" data-grade="good" type="button">Good</button>
+        <button class="ghost small review-grade" data-grade="easy" type="button">Easy</button>
+        <button class="primary small review-submit" type="button" disabled>Submit</button>
+      </div>
+      <div class="review-card__row">
+        <button class="ghost small review-notes-toggle" type="button">Reveal notes</button>
+        <button class="ghost small review-snooze" data-snooze="tomorrow" type="button">Snooze to tomorrow</button>
+        <button class="ghost small review-snooze" data-snooze="weekend" type="button">Snooze to weekend</button>
+      </div>
     </div>
+    <div class="review-notes is-hidden" aria-live="polite"></div>
   `;
-  const buttons = card.querySelectorAll('button');
-  const reviewBtn = buttons[0];
-  const snoozeTomorrowBtn = buttons[1];
-  const snoozeWeekendBtn = buttons[2];
+  const actionButtons = card.querySelectorAll('button');
+  const gradeButtons = card.querySelectorAll('.review-grade');
+  const submitButton = card.querySelector('.review-submit');
+  const snoozeButtons = card.querySelectorAll('.review-snooze');
+  const notesToggle = card.querySelector('.review-notes-toggle');
+  const notesPanel = card.querySelector('.review-notes');
   const setDisabled = (value) => {
-    buttons.forEach((btn) => {
+    actionButtons.forEach((btn) => {
       btn.disabled = value;
     });
   };
   const runAction = (promise) => {
     setDisabled(true);
-    promise.then(loadReview).catch(() => setDisabled(false));
+    promise
+      .then(() => {
+        incrementReviewCount();
+        loadReview();
+      })
+      .catch(() => setDisabled(false));
   };
-  reviewBtn.addEventListener('click', () => runAction(markReviewed(item.id)));
-  snoozeTomorrowBtn.addEventListener('click', () =>
-    runAction(snoozeReview(item.id, getTomorrowDate())),
-  );
-  snoozeWeekendBtn.addEventListener('click', () =>
-    runAction(snoozeReview(item.id, getUpcomingSaturdayDate())),
-  );
+  let selectedGrade = null;
+  gradeButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      selectedGrade = button.dataset.grade;
+      gradeButtons.forEach((btn) => {
+        btn.classList.toggle('is-selected', btn === button);
+      });
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+    });
+  });
+  if (submitButton) {
+    submitButton.addEventListener('click', () => {
+      if (!selectedGrade) return;
+      runAction(markReviewed(item.id, selectedGrade));
+    });
+  }
+  snoozeButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = button.dataset.snooze;
+      const date = target === 'weekend' ? getUpcomingSaturdayDate() : getTomorrowDate();
+      runAction(snoozeReview(item.id, date));
+    });
+  });
+  notesToggle.addEventListener('click', () => {
+    const hidden = notesPanel.classList.contains('is-hidden');
+    if (hidden) {
+      notesPanel.classList.remove('is-hidden');
+      notesToggle.textContent = 'Hide notes';
+      if (!notesPanel.dataset.loaded) {
+        notesPanel.dataset.loaded = 'true';
+        notesPanel.innerHTML = '<div class="review-notes__empty muted">Loading notes...</div>';
+        getReviewNotes(item.id)
+          .then((payload) => {
+            if (!payload || !payload.html) {
+              notesPanel.innerHTML = '<div class="review-notes__empty">No notes yet.</div>';
+              return;
+            }
+            notesPanel.innerHTML = `
+              <div class="review-notes__meta">Last notes: ${payload.attemptAt}</div>
+              <div class="review-notes__body markdown">${payload.html}</div>
+            `;
+            const body = notesPanel.querySelector('.review-notes__body');
+            enhanceMarkdownBlocks(body);
+            typesetMath(body);
+          })
+          .catch(() => {
+            notesPanel.innerHTML = '<div class="review-notes__empty">Failed to load notes.</div>';
+          });
+      }
+    } else {
+      notesPanel.classList.add('is-hidden');
+      notesToggle.textContent = 'Reveal notes';
+    }
+  });
   reviewList.appendChild(card);
 }
 
@@ -667,6 +837,11 @@ function loadTags() {
 }
 
 function loadReview() {
+  state.reviewNotes.clear();
+  if (hasReachedReviewLimit()) {
+    renderReviewComplete();
+    return Promise.resolve();
+  }
   return api('/api/reviews?limit=1').then((data) => renderReview(data.reviews || []));
 }
 
@@ -704,8 +879,11 @@ function loadProblemDetail(problemId) {
   });
 }
 
-function markReviewed(problemId) {
-  return api(`/api/reviews/${problemId}`, { method: 'POST' });
+function markReviewed(problemId, grade = 'good') {
+  return api(`/api/reviews/${problemId}`, {
+    method: 'POST',
+    body: JSON.stringify({ grade }),
+  });
 }
 
 function snoozeReview(problemId, until) {

@@ -25,6 +25,11 @@ from db import (
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
+IMPORTANCE_ALIASES = {
+    "critical": "High",
+    "crit": "High",
+}
+
 
 def _days_since(value: str | None) -> int | None:
     if not value:
@@ -36,6 +41,17 @@ def _days_since(value: str | None) -> int | None:
     return (date.today() - base).days
 
 
+def _normalize_importance(value: str | None) -> str:
+    if not value:
+        return "Medium"
+    lowered = value.strip().lower()
+    if lowered in {"high", "low", "medium"}:
+        return lowered.title()
+    if lowered in IMPORTANCE_ALIASES:
+        return IMPORTANCE_ALIASES[lowered]
+    return "Medium"
+
+
 def _problem_payload(row) -> Dict[str, Any]:
     tags = []
     if row["tags"]:
@@ -45,7 +61,7 @@ def _problem_payload(row) -> Dict[str, Any]:
         "lc_num": row["lc_num"],
         "title": row["title"],
         "tags": tags,
-        "importance": row["frequency"],
+        "importance": _normalize_importance(row["frequency"]),
         "created_at": row["created_at"],
         "last_attempt_at": row["last_attempt_at"],
         "last_review_at": row["last_review_at"],
@@ -115,7 +131,7 @@ def api_problem_detail(problem_id: int):
         "lc_num": row["lc_num"],
         "title": row["title"],
         "tags": [t.strip() for t in (row["tags"] or "").split(",") if t.strip()],
-        "importance": row["frequency"],
+        "importance": _normalize_importance(row["frequency"]),
         "review_count": row["review_count"],
         "days_since": _days_since(row["last_attempt_at"]),
     }
@@ -132,7 +148,9 @@ def api_reviews():
 
 @app.post("/api/reviews/<int:problem_id>")
 def api_mark_review(problem_id: int):
-    mark_review(problem_id)
+    data = request.get_json(silent=True) or {}
+    grade = (data.get("grade") or "good").strip()
+    mark_review(problem_id, grade)
     return jsonify({"ok": True})
 
 
@@ -158,7 +176,7 @@ def api_add_attempt():
     tags = data.get("tags") or []
     if isinstance(tags, str):
         tags = [tags]
-    importance = (data.get("importance") or "Medium").strip()
+    importance = _normalize_importance(data.get("importance"))
     notes = (data.get("notes") or "").strip()
     if not lc_num or not title or not notes:
         return jsonify({"ok": False, "error": "Missing required fields"}), 400

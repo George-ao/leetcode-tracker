@@ -25,9 +25,21 @@ DEFAULT_TAGS = [
 ]
 
 IMPORTANCE_INTERVALS = {
+    "Low": [4, 8, 15, 30, 60, 120, 180],
     "Medium": [2, 4, 7, 15, 30, 60, 90],
     "High": [1, 2, 4, 7, 15, 30, 60],
 }
+
+
+def _normalize_importance(value: str | None) -> str:
+    if not value:
+        return "Medium"
+    lowered = value.strip().lower()
+    if lowered in {"high", "critical", "crit"}:
+        return "High"
+    if lowered in {"low"}:
+        return "Low"
+    return "Medium"
 
 
 def _connect() -> sqlite3.Connection:
@@ -94,6 +106,9 @@ def init_db() -> None:
     if "snooze_until" not in columns:
         cur.execute("ALTER TABLE problems ADD COLUMN snooze_until TEXT")
         conn.commit()
+
+    cur.execute("UPDATE problems SET frequency = 'High' WHERE frequency = 'Critical'")
+    conn.commit()
 
     for tag in DEFAULT_TAGS:
         cur.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
@@ -174,6 +189,7 @@ def add_attempt(
     attempt_at: Optional[str] = None,
 ) -> None:
     attempt_at = attempt_at or date.today().isoformat()
+    frequency = _normalize_importance(frequency)
 
     conn = _connect()
     cur = conn.cursor()
@@ -189,7 +205,7 @@ def add_attempt(
             SET title = ?, tag_id = ?, frequency = ?, last_attempt_at = ?, last_review_at = ?, snooze_until = NULL
             WHERE id = ?
             """,
-            (title.strip(), tag_id, frequency or "Medium", attempt_at, attempt_at, problem_id),
+            (title.strip(), tag_id, frequency, attempt_at, attempt_at, problem_id),
         )
     else:
         cur.execute(
@@ -197,7 +213,7 @@ def add_attempt(
             INSERT INTO problems (lc_num, title, tag_id, frequency, created_at, last_attempt_at, last_review_at, snooze_until)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (lc_num.strip(), title.strip(), tag_id, frequency or "Medium", attempt_at, attempt_at, attempt_at, None),
+            (lc_num.strip(), title.strip(), tag_id, frequency, attempt_at, attempt_at, attempt_at, None),
         )
         problem_id = int(cur.lastrowid)
 
@@ -221,17 +237,30 @@ def add_attempt(
     backup_db()
 
 
-def mark_review(problem_id: int) -> None:
+def mark_review(problem_id: int, grade: str = "good") -> None:
     today = date.today().isoformat()
     conn = _connect()
     cur = conn.cursor()
+    cur.execute("SELECT review_count FROM problems WHERE id = ?", (int(problem_id),))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return
+    current = int(row["review_count"] or 0)
+    grade = (grade or "good").strip().lower()
+    if grade == "again":
+        new_count = 0
+    elif grade == "easy":
+        new_count = current + 2
+    else:
+        new_count = current + 1
     cur.execute(
         """
         UPDATE problems
-        SET last_review_at = ?, review_count = review_count + 1, snooze_until = NULL
+        SET last_review_at = ?, review_count = ?, snooze_until = NULL
         WHERE id = ?
         """,
-        (today, int(problem_id)),
+        (today, new_count, int(problem_id)),
     )
     conn.commit()
     conn.close()
@@ -362,7 +391,8 @@ def get_due_reviews(limit: int = 3) -> List[sqlite3.Row]:
         except ValueError:
             base_date = today
 
-        intervals = IMPORTANCE_INTERVALS.get(row["frequency"], IMPORTANCE_INTERVALS["Medium"])
+        importance = _normalize_importance(row["frequency"])
+        intervals = IMPORTANCE_INTERVALS.get(importance, IMPORTANCE_INTERVALS["Medium"])
         stage = min(int(row["review_count"]), len(intervals) - 1)
         required_days = intervals[stage]
         delta_days = (today - base_date).days
