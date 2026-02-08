@@ -6,6 +6,16 @@
   --accent: #1f7a6d;
   --accent-soft: #d7f2ee;
   --highlight: #cfeae4;
+  --code-bg: #f1f6f5;
+  --code-border: #d7e5e1;
+  --code-ink: #1b2b28;
+  --code-muted: #7a8b86;
+  --code-header: #e6f1ee;
+  --code-keyword: #0a5f57;
+  --code-string: #c2471c;
+  --code-number: #1a4fa3;
+  --code-literal: #0b4943;
+  --code-comment: #4f5c58;
   --shadow: 0 18px 40px rgba(47, 35, 28, 0.08);
 }
 
@@ -248,6 +258,18 @@ textarea {
   margin-bottom: 16px;
 }
 
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sort-control select {
+  min-width: 150px;
+}
+
 .tag-select {
   display: flex;
   flex-wrap: wrap;
@@ -307,6 +329,23 @@ textarea {
   border: 1px solid transparent;
 }
 
+.list-item.is-pinned {
+  border-color: #b7dcd5;
+  background: #f6fdfb;
+}
+
+.list-item__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pin-toggle.is-pinned {
+  background: var(--accent);
+  color: #fff;
+}
+
 .list-item:hover,
 .list-item.active {
   border-color: var(--accent);
@@ -326,7 +365,8 @@ textarea {
 .detail-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
@@ -334,6 +374,40 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   margin-bottom: 12px;
+}
+
+.detail-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-tag {
+  border: none;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.detail-tag.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.detail-tag--empty {
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  cursor: default;
 }
 
 .note-card {
@@ -374,22 +448,123 @@ textarea {
   margin: 12px 0 6px;
 }
 
-.markdown code {
+.markdown :not(pre) > code {
   background: #e8f6f2;
   color: #0f3c37;
   padding: 2px 6px;
   border-radius: 6px;
-  font-family: "Menlo", monospace;
+  font-family: "Menlo", "SF Mono", monospace;
   font-size: 12px;
 }
 
 .markdown pre {
-  background: #0f0f10;
-  color: #f8f8f8;
-  border: 1px solid #262626;
-  padding: 10px 12px;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: 1px solid var(--code-border);
+  padding: 12px 14px;
   border-radius: 10px;
   overflow: auto;
+  line-height: 1.5;
+}
+
+.markdown pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-family: "Menlo", "SF Mono", monospace;
+  font-size: 13px;
+}
+
+.code-block {
+  border: 1px solid var(--code-border);
+  border-radius: 12px;
+  background: var(--code-bg);
+  overflow: hidden;
+  margin: 12px 0;
+}
+
+.code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--code-header);
+  border-bottom: 1px solid var(--code-border);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--code-muted);
+}
+
+.code-block__lang {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.code-block__copy.is-copied {
+  background: var(--highlight);
+  color: var(--accent);
+}
+
+.code-block__pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0 12px;
+  overflow: auto;
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+.code-block__code {
+  display: block;
+  counter-reset: code-line;
+  padding: 0 14px;
+}
+
+.code-block .code-line {
+  display: block;
+  position: relative;
+  padding-left: 3.2em;
+  white-space: pre;
+}
+
+.code-block .code-line::before {
+  counter-increment: code-line;
+  content: counter(code-line);
+  position: absolute;
+  left: 0;
+  width: 2.4em;
+  text-align: right;
+  padding-right: 0.8em;
+  color: var(--code-muted);
+  border-right: 1px solid var(--code-border);
+}
+
+.code-block .tok-keyword {
+  color: var(--code-keyword);
+  font-weight: 700;
+}
+
+.code-block .tok-string {
+  color: var(--code-string);
+  font-weight: 600;
+}
+
+.code-block .tok-number {
+  color: var(--code-number);
+  font-weight: 600;
+}
+
+.code-block .tok-literal {
+  color: var(--code-literal);
+  font-weight: 700;
+}
+
+.code-block .tok-comment {
+  color: var(--code-comment);
+  font-style: italic;
 }
 
 .markdown blockquote {

@@ -10,6 +10,7 @@ const addStatus = document.getElementById('add-status');
 const searchInput = document.getElementById('search-input');
 const searchTagsContainer = document.getElementById('search-tags');
 const searchButton = document.getElementById('search-button');
+const sortSelect = document.getElementById('sort-select');
 const libraryList = document.getElementById('library-list');
 const libraryDetail = document.getElementById('library-detail');
 
@@ -17,12 +18,24 @@ const tagList = document.getElementById('tag-list');
 const tagNew = document.getElementById('tag-new');
 const tagAdd = document.getElementById('tag-add');
 
+const SORT_STORAGE_KEY = 'lc_tracker_sort';
+const PIN_STORAGE_KEY = 'lc_tracker_pins';
+const REVIEW_INTERVALS = {
+  Medium: [2, 4, 7, 15, 30, 60, 90],
+  High: [1, 2, 4, 7, 15, 30, 60],
+};
+
 const state = {
   tags: [],
   problems: [],
   activeProblemId: null,
   searchTags: [],
+  sortBy: 'last_attempt',
+  pinnedIds: new Set(),
 };
+
+state.sortBy = loadSortPreference();
+state.pinnedIds = loadPinnedIds();
 
 function setView(viewId) {
   views.forEach((view) => {
@@ -44,6 +57,381 @@ function api(url, options = {}) {
     }
     return res.json();
   });
+}
+
+const CODE_KEYWORDS = [
+  'const',
+  'let',
+  'var',
+  'function',
+  'return',
+  'if',
+  'else',
+  'for',
+  'while',
+  'do',
+  'switch',
+  'case',
+  'break',
+  'continue',
+  'class',
+  'new',
+  'this',
+  'super',
+  'try',
+  'catch',
+  'finally',
+  'throw',
+  'import',
+  'from',
+  'export',
+  'default',
+  'async',
+  'await',
+  'def',
+  'lambda',
+  'yield',
+  'with',
+  'as',
+  'pass',
+  'raise',
+  'public',
+  'private',
+  'protected',
+  'static',
+  'enum',
+  'struct',
+  'interface',
+  'extends',
+  'implements',
+  'package',
+  'namespace',
+];
+
+const CODE_LITERALS = ['true', 'false', 'null', 'None', 'nil'];
+const CODE_LITERAL_SET = new Set(CODE_LITERALS);
+const CODE_TOKEN_REGEX = new RegExp(
+  `\\b(${CODE_KEYWORDS.concat(CODE_LITERALS).join('|')}|\\d+(?:\\.\\d+)?)\\b`,
+  'g',
+);
+
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function highlightTextSegment(text) {
+  let html = '';
+  let lastIndex = 0;
+  text.replace(CODE_TOKEN_REGEX, (match, _token, offset) => {
+    html += escapeHtml(text.slice(lastIndex, offset));
+    let className = 'tok-keyword';
+    if (/^\d/.test(match)) {
+      className = 'tok-number';
+    } else if (CODE_LITERAL_SET.has(match)) {
+      className = 'tok-literal';
+    }
+    html += `<span class="${className}">${escapeHtml(match)}</span>`;
+    lastIndex = offset + match.length;
+    return match;
+  });
+  html += escapeHtml(text.slice(lastIndex));
+  return html;
+}
+
+function highlightLine(line) {
+  const segments = [];
+  let current = '';
+  let mode = 'text';
+  let quote = null;
+
+  const pushSegment = () => {
+    if (!current) return;
+    segments.push({ type: mode, value: current });
+    current = '';
+  };
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (mode === 'text') {
+      if (char === '"' || char === "'" || char === '`') {
+        pushSegment();
+        mode = 'string';
+        quote = char;
+        current = char;
+        continue;
+      }
+      if (char === '/' && line[i + 1] === '/') {
+        pushSegment();
+        segments.push({ type: 'comment', value: line.slice(i) });
+        break;
+      }
+      if (char === '-' && line[i + 1] === '-' && (i === 0 || /\s/.test(line[i - 1]))) {
+        pushSegment();
+        segments.push({ type: 'comment', value: line.slice(i) });
+        break;
+      }
+      if (char === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+        pushSegment();
+        segments.push({ type: 'comment', value: line.slice(i) });
+        break;
+      }
+      current += char;
+      continue;
+    }
+
+    current += char;
+    if (char === '\\' && i + 1 < line.length) {
+      current += line[i + 1];
+      i += 1;
+      continue;
+    }
+    if (char === quote) {
+      segments.push({ type: 'string', value: current });
+      current = '';
+      mode = 'text';
+      quote = null;
+    }
+  }
+
+  if (current) {
+    segments.push({ type: mode, value: current });
+  }
+
+  return segments
+    .map((segment) => {
+      if (segment.type === 'string') {
+        return `<span class="tok-string">${escapeHtml(segment.value)}</span>`;
+      }
+      if (segment.type === 'comment') {
+        return `<span class="tok-comment">${escapeHtml(segment.value)}</span>`;
+      }
+      return highlightTextSegment(segment.value);
+    })
+    .join('');
+}
+
+function getLanguageLabel(code) {
+  const className = Array.from(code.classList).find((name) => name.startsWith('language-'));
+  if (!className) {
+    return 'CODE';
+  }
+  return className.replace('language-', '').toUpperCase();
+}
+
+function flashCopyState(button) {
+  const original = button.textContent;
+  button.textContent = 'Copied';
+  button.classList.add('is-copied');
+  setTimeout(() => {
+    button.textContent = original;
+    button.classList.remove('is-copied');
+  }, 1200);
+}
+
+function fallbackCopy(text, button) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  textarea.style.left = '-1000px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    document.execCommand('copy');
+  } catch (err) {
+  }
+  document.body.removeChild(textarea);
+  flashCopyState(button);
+}
+
+function copyToClipboard(text, button) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => flashCopyState(button))
+      .catch(() => fallbackCopy(text, button));
+  } else {
+    fallbackCopy(text, button);
+  }
+}
+
+function enhanceMarkdownBlocks(container) {
+  const blocks = container.querySelectorAll('pre > code');
+  blocks.forEach((code) => {
+    const pre = code.parentElement;
+    if (!pre || pre.dataset.enhanced === 'true') return;
+
+    const raw = code.textContent || '';
+    const language = getLanguageLabel(code);
+    const lines = raw.split('\n');
+
+    code.innerHTML = lines
+      .map((line) => {
+        const highlighted = highlightLine(line);
+        return `<span class="code-line">${highlighted || '&nbsp;'}</span>`;
+      })
+      .join('');
+
+    pre.dataset.enhanced = 'true';
+    pre.classList.add('code-block__pre');
+    code.classList.add('code-block__code');
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'code-block';
+
+    const header = document.createElement('div');
+    header.className = 'code-block__header';
+
+    const label = document.createElement('span');
+    label.className = 'code-block__lang';
+    label.textContent = language;
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'ghost small code-block__copy';
+    copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', () => copyToClipboard(raw, copyBtn));
+
+    header.appendChild(label);
+    header.appendChild(copyBtn);
+
+    const parent = pre.parentNode;
+    parent.insertBefore(wrapper, pre);
+    wrapper.appendChild(header);
+    wrapper.appendChild(pre);
+  });
+}
+
+function loadSortPreference() {
+  try {
+    const stored = localStorage.getItem(SORT_STORAGE_KEY);
+    if (stored === 'importance' || stored === 'review_due' || stored === 'last_attempt') {
+      return stored;
+    }
+    return 'last_attempt';
+  } catch (err) {
+    return 'last_attempt';
+  }
+}
+
+function saveSortPreference(value) {
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, value);
+  } catch (err) {
+    // Ignore storage failures.
+  }
+}
+
+function loadPinnedIds() {
+  try {
+    const raw = localStorage.getItem(PIN_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    const ids = parsed.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+    return new Set(ids);
+  } catch (err) {
+    return new Set();
+  }
+}
+
+function savePinnedIds() {
+  try {
+    localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(Array.from(state.pinnedIds)));
+  } catch (err) {
+    // Ignore storage failures.
+  }
+}
+
+function isPinned(id) {
+  return state.pinnedIds.has(Number(id));
+}
+
+function togglePin(id) {
+  const idValue = Number(id);
+  if (!Number.isFinite(idValue)) return;
+  if (state.pinnedIds.has(idValue)) {
+    state.pinnedIds.delete(idValue);
+  } else {
+    state.pinnedIds.add(idValue);
+  }
+  savePinnedIds();
+  renderLibraryList(getSortedProblems());
+}
+
+function parseDateValue(value) {
+  if (!value) return 0;
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return 0;
+  return parsed.getTime();
+}
+
+function getDaysSince(value) {
+  const timestamp = parseDateValue(value);
+  if (!timestamp) return 0;
+  const diff = Date.now() - timestamp;
+  return Math.floor(diff / 86400000);
+}
+
+function getImportanceRank(importance) {
+  if (importance === 'High') return 2;
+  if (importance === 'Medium') return 1;
+  return 0;
+}
+
+function getDueScore(item) {
+  const intervals = REVIEW_INTERVALS[item.importance] || REVIEW_INTERVALS.Medium;
+  const stage = Math.min(item.review_count || 0, intervals.length - 1);
+  const requiredDays = intervals[stage];
+  const baseDate = item.last_review_at || item.last_attempt_at || item.created_at;
+  const deltaDays = getDaysSince(baseDate);
+  return deltaDays - requiredDays;
+}
+
+function getSortedProblems() {
+  const items = [...state.problems];
+  items.sort((a, b) => {
+    const pinnedDiff = (isPinned(b.id) ? 1 : 0) - (isPinned(a.id) ? 1 : 0);
+    if (pinnedDiff) return pinnedDiff;
+
+    if (state.sortBy === 'importance') {
+      const diff = getImportanceRank(b.importance) - getImportanceRank(a.importance);
+      if (diff) return diff;
+    } else if (state.sortBy === 'review_due') {
+      const diff = getDueScore(b) - getDueScore(a);
+      if (diff) return diff;
+    } else {
+      const diff =
+        parseDateValue(b.last_attempt_at || b.created_at) -
+        parseDateValue(a.last_attempt_at || a.created_at);
+      if (diff) return diff;
+    }
+
+    return parseDateValue(b.last_attempt_at || b.created_at) - parseDateValue(a.last_attempt_at || a.created_at);
+  });
+  return items;
+}
+
+function setSearchTags(tags) {
+  state.searchTags = tags;
+  renderTagSelector(searchTagsContainer, state.tags, state.searchTags);
+}
+
+function applyTagFilter(tag) {
+  const value = (tag || '').trim();
+  if (!value) return;
+  if (state.searchTags.length === 1 && state.searchTags[0] === value) {
+    setSearchTags([]);
+  } else {
+    setSearchTags([value]);
+  }
+  loadLibrary();
 }
 
 function renderTagSelector(container, tags, selected) {
@@ -120,12 +508,26 @@ function renderLibraryList(problems) {
     if (item.id === state.activeProblemId) {
       row.classList.add('active');
     }
+    const pinned = isPinned(item.id);
+    if (pinned) {
+      row.classList.add('is-pinned');
+    }
     const days = item.days_since ?? '-';
     const tagText = item.tags?.length ? item.tags.join(', ') : 'No Tag';
     row.innerHTML = `
-      <h4>${item.lc_num}. ${item.title}</h4>
+      <div class="list-item__header">
+        <h4>${item.lc_num}. ${item.title}</h4>
+        <button class="ghost small pin-toggle${pinned ? ' is-pinned' : ''}" type="button">
+          ${pinned ? 'Pinned' : 'Pin'}
+        </button>
+      </div>
       <p>${tagText} | Attempts ${item.attempt_count} | Reviews ${item.review_count} | Days since ${days}</p>
     `;
+    const pinButton = row.querySelector('.pin-toggle');
+    pinButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      togglePin(item.id);
+    });
     row.addEventListener('click', () => loadProblemDetail(item.id));
     libraryList.appendChild(row);
   });
@@ -136,17 +538,28 @@ function renderProblemDetail(detail, attempts) {
   const days = detail.days_since ?? '-';
   const header = document.createElement('div');
   header.className = 'detail-header';
-  const tagText = detail.tags?.length ? detail.tags.join(', ') : 'No Tag';
+  const tagMarkup = detail.tags?.length
+    ? detail.tags
+        .map((tag) => {
+          const active = state.searchTags.includes(tag) ? ' is-active' : '';
+          return `<button class="detail-tag${active}" data-tag="${tag}" type="button">${tag}</button>`;
+        })
+        .join('')
+    : '<span class="detail-tag detail-tag--empty">No tags</span>';
   header.innerHTML = `
-    <div>
+    <div class="detail-info">
       <h2>${detail.lc_num}. ${detail.title}</h2>
-      <div class="detail-meta">${tagText} | Importance ${detail.importance} | Attempts ${attempts.length} | Reviews ${detail.review_count} | Days since ${days}</div>
+      <div class="detail-tags">${tagMarkup}</div>
+      <div class="detail-meta">Importance ${detail.importance} | Attempts ${attempts.length} | Reviews ${detail.review_count} | Days since ${days}</div>
     </div>
     <button class="ghost small" id="delete-problem">Delete Problem</button>
   `;
   libraryDetail.appendChild(header);
 
   document.getElementById('delete-problem').addEventListener('click', () => deleteProblem(detail.id));
+  header.querySelectorAll('.detail-tag[data-tag]').forEach((tagButton) => {
+    tagButton.addEventListener('click', () => applyTagFilter(tagButton.dataset.tag));
+  });
 
   if (!attempts.length) {
     libraryDetail.innerHTML += '<div class="empty">No notes yet.</div>';
@@ -176,6 +589,7 @@ function renderProblemDetail(detail, attempts) {
     const deleteBtn = buttons[3];
     const textarea = card.querySelector('.note-editor');
     const preview = card.querySelector('.note-preview');
+    enhanceMarkdownBlocks(preview);
 
     editBtn.addEventListener('click', () => {
       textarea.classList.remove('is-hidden');
@@ -217,8 +631,12 @@ function loadLibrary() {
   });
   return api(`/api/problems?${params.toString()}`).then((data) => {
     state.problems = data.problems || [];
-    state.activeProblemId = state.problems[0]?.id || null;
-    renderLibraryList(state.problems);
+    const sorted = getSortedProblems();
+    const hasActive = sorted.some((item) => item.id === state.activeProblemId);
+    if (!hasActive) {
+      state.activeProblemId = sorted[0]?.id || null;
+    }
+    renderLibraryList(sorted);
     if (state.activeProblemId) {
       loadProblemDetail(state.activeProblemId);
     }
@@ -227,7 +645,7 @@ function loadLibrary() {
 
 function loadProblemDetail(problemId) {
   state.activeProblemId = problemId;
-  renderLibraryList(state.problems);
+  renderLibraryList(getSortedProblems());
   api(`/api/problems/${problemId}`).then((data) => {
     renderProblemDetail(data.detail, data.attempts || []);
   });
@@ -304,6 +722,21 @@ navButtons.forEach((btn) => {
 
 reviewRefresh.addEventListener('click', loadReview);
 searchButton.addEventListener('click', loadLibrary);
+if (searchTagsContainer) {
+  searchTagsContainer.addEventListener('change', (event) => {
+    if (event.target && event.target.matches('input[type="checkbox"]')) {
+      loadLibrary();
+    }
+  });
+}
+if (sortSelect) {
+  sortSelect.value = state.sortBy;
+  sortSelect.addEventListener('change', () => {
+    state.sortBy = sortSelect.value;
+    saveSortPreference(state.sortBy);
+    renderLibraryList(getSortedProblems());
+  });
+}
 
 addForm.addEventListener('submit', (event) => {
   event.preventDefault();
