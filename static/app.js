@@ -39,6 +39,8 @@ const state = {
   reviewNotes: new Map(),
   reviewAllowExtra: false,
   reviewDay: null,
+  dashboardRange: 'month',
+  dashboardTrends: {},
 };
 
 state.sortBy = loadSortPreference();
@@ -732,6 +734,7 @@ function renderDashboard(data) {
   const coverage = activity.coverage_30d || { count: 0, total: 0, percent: 0 };
   const importance = data.importance || {};
   const topTags = data.top_tags || [];
+  state.dashboardTrends = data.trends || {};
   const coverageText = coverage.total ? `${coverage.count}/${coverage.total} (${coverage.percent}%)` : '—';
 
   const stats = [
@@ -781,6 +784,23 @@ function renderDashboard(data) {
         )
         .join('')}
     </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <h3>Attempts vs reviews</h3>
+        <div class="chart-toggle" role="group" aria-label="Trend range">
+          <button class="ghost small" data-range="week" type="button">Week</button>
+          <button class="ghost small" data-range="month" type="button">Month</button>
+          <button class="ghost small" data-range="year" type="button">Year</button>
+        </div>
+      </div>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-dot legend-attempts"></span>Attempted</span>
+        <span class="legend-item"><span class="legend-dot legend-reviews"></span>Reviewed</span>
+      </div>
+      <div class="chart-note">Unique problems per day/month.</div>
+      <div class="chart-canvas" id="trend-chart"></div>
+      <div class="chart-axis" id="trend-axis"></div>
+    </div>
     <div class="dashboard-sections">
       <div class="dashboard-section">
         <h3>Activity</h3>
@@ -816,6 +836,133 @@ function renderDashboard(data) {
         </div>
       </div>
     </div>
+  `;
+
+  const toggleButtons = dashboardContainer.querySelectorAll('.chart-toggle button');
+  toggleButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.range === state.dashboardRange);
+    button.addEventListener('click', () => {
+      state.dashboardRange = button.dataset.range;
+      toggleButtons.forEach((btn) => {
+        btn.classList.toggle('is-active', btn === button);
+      });
+      renderTrendChart();
+    });
+  });
+  renderTrendChart();
+}
+
+function getTrendSeries() {
+  const trends = state.dashboardTrends || {};
+  const series = trends[state.dashboardRange] || {};
+  const labels = Array.isArray(series.labels) ? series.labels : [];
+  const attempts = Array.isArray(series.attempts) ? series.attempts : [];
+  const reviews = Array.isArray(series.reviews) ? series.reviews : [];
+  return { labels, attempts, reviews };
+}
+
+function buildLinePoints(values, width, height, padding, maxValue) {
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+  const count = values.length;
+  const step = count > 1 ? usableWidth / (count - 1) : 0;
+  return values.map((value, index) => {
+    const x = padding + step * index;
+    const ratio = maxValue ? value / maxValue : 0;
+    const y = height - padding - usableHeight * ratio;
+    return { x, y, value, index };
+  });
+}
+
+function renderTrendChart() {
+  const chart = document.getElementById('trend-chart');
+  const axis = document.getElementById('trend-axis');
+  if (!chart || !axis) return;
+  const { labels, attempts, reviews } = getTrendSeries();
+  if (!labels.length) {
+    chart.innerHTML = '<div class="empty">No trend data yet.</div>';
+    axis.innerHTML = '';
+    return;
+  }
+
+  const width = 640;
+  const height = 220;
+  const padding = 28;
+  const maxValue = Math.max(1, ...attempts, ...reviews);
+  const gridLines = 4;
+  const gridMarkup = Array.from({ length: gridLines + 1 })
+    .map((_, index) => {
+      const y = padding + ((height - padding * 2) * index) / gridLines;
+      return `<line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" />`;
+    })
+    .join('');
+
+  const attemptsPoints = buildLinePoints(attempts, width, height, padding, maxValue);
+  const reviewsPoints = buildLinePoints(reviews, width, height, padding, maxValue);
+
+  const formatPoints = (points) =>
+    points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
+
+  const attemptsLine = formatPoints(attemptsPoints);
+  const reviewsLine = formatPoints(reviewsPoints);
+
+  const tickCount = 4;
+  const tickMarkup = Array.from({ length: tickCount + 1 })
+    .map((_, index) => {
+      const value = Math.round((maxValue * index) / tickCount);
+      const ratio = maxValue ? value / maxValue : 0;
+      const y = height - padding - (height - padding * 2) * ratio;
+      return `
+        <g class="chart-axis-y__tick">
+          <line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" />
+          <text x="${padding - 8}" y="${y + 4}" text-anchor="end">${value}</text>
+        </g>
+      `;
+    })
+    .join('');
+
+  chart.innerHTML = `
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Attempts and reviews over time">
+      <g class="chart-axis-y">
+        <text class="chart-axis-label" x="${padding}" y="${padding - 10}">Count</text>
+        ${tickMarkup}
+      </g>
+      <g class="chart-grid">${gridMarkup}</g>
+      <polyline class="chart-line chart-line--attempts" points="${attemptsLine}" />
+      <polyline class="chart-line chart-line--reviews" points="${reviewsLine}" />
+      <g class="chart-points chart-points--attempts">
+        ${attemptsPoints
+          .map(
+            (point) => `
+              <circle cx="${point.x}" cy="${point.y}" r="2.6">
+                <title>${labels[point.index]}: ${point.value}</title>
+              </circle>
+            `,
+          )
+          .join('')}
+      </g>
+      <g class="chart-points chart-points--reviews">
+        ${reviewsPoints
+          .map(
+            (point) => `
+              <circle cx="${point.x}" cy="${point.y}" r="2.6">
+                <title>${labels[point.index]}: ${point.value}</title>
+              </circle>
+            `,
+          )
+          .join('')}
+      </g>
+    </svg>
+  `;
+
+  const midIndex = Math.floor(labels.length / 2);
+  const leftLabel = labels[0];
+  const midLabel = labels[midIndex];
+  const rightLabel = labels[labels.length - 1];
+  axis.innerHTML = `
+    <span>${leftLabel}</span>
+    <span>${midLabel}</span>
+    <span>${rightLabel}</span>
   `;
 }
 

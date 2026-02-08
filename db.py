@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -95,6 +95,17 @@ def init_db() -> None:
             problem_id INTEGER NOT NULL,
             attempt_at TEXT NOT NULL,
             notes TEXT NOT NULL,
+            FOREIGN KEY (problem_id) REFERENCES problems (id)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS review_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            problem_id INTEGER NOT NULL,
+            reviewed_at TEXT NOT NULL,
+            grade TEXT,
             FOREIGN KEY (problem_id) REFERENCES problems (id)
         )
         """
@@ -262,6 +273,10 @@ def mark_review(problem_id: int, grade: str = "good") -> None:
         """,
         (today, new_count, int(problem_id)),
     )
+    cur.execute(
+        "INSERT INTO review_logs (problem_id, reviewed_at, grade) VALUES (?, ?, ?)",
+        (int(problem_id), today, grade),
+    )
     conn.commit()
     conn.close()
     backup_db()
@@ -407,6 +422,95 @@ def get_due_reviews(limit: int = 3) -> List[sqlite3.Row]:
     return []
 
 
+def _build_daily_trends(cur: sqlite3.Cursor, days: int) -> dict:
+    today = date.today()
+    start = today - timedelta(days=days - 1)
+    keys = [start + timedelta(days=i) for i in range(days)]
+    date_keys = [value.isoformat() for value in keys]
+    labels = [value.strftime("%m-%d") for value in keys]
+
+    cur.execute(
+        """
+        SELECT attempt_at AS day, COUNT(DISTINCT problem_id) AS count
+        FROM attempts
+        WHERE attempt_at >= ? AND attempt_at <= ?
+        GROUP BY attempt_at
+        """,
+        (start.isoformat(), today.isoformat()),
+    )
+    attempt_counts = {row["day"]: int(row["count"] or 0) for row in cur.fetchall()}
+
+    cur.execute(
+        """
+        SELECT reviewed_at AS day, COUNT(DISTINCT problem_id) AS count
+        FROM review_logs
+        WHERE reviewed_at >= ? AND reviewed_at <= ?
+        GROUP BY reviewed_at
+        """,
+        (start.isoformat(), today.isoformat()),
+    )
+    review_counts = {row["day"]: int(row["count"] or 0) for row in cur.fetchall()}
+
+    return {
+        "labels": labels,
+        "attempts": [attempt_counts.get(key, 0) for key in date_keys],
+        "reviews": [review_counts.get(key, 0) for key in date_keys],
+    }
+
+
+def _build_monthly_trends(cur: sqlite3.Cursor, months: int) -> dict:
+    today = date.today()
+    start_month = today.month - (months - 1)
+    start_year = today.year
+    while start_month <= 0:
+        start_month += 12
+        start_year -= 1
+
+    month_keys = []
+    labels = []
+    year = start_year
+    month = start_month
+    for _ in range(months):
+        key = f"{year:04d}-{month:02d}"
+        month_keys.append(key)
+        labels.append(key)
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+
+    start_date = date(start_year, start_month, 1).isoformat()
+    today_date = today.isoformat()
+
+    cur.execute(
+        """
+        SELECT strftime('%Y-%m', attempt_at) AS month, COUNT(DISTINCT problem_id) AS count
+        FROM attempts
+        WHERE attempt_at >= ? AND attempt_at <= ?
+        GROUP BY month
+        """,
+        (start_date, today_date),
+    )
+    attempt_counts = {row["month"]: int(row["count"] or 0) for row in cur.fetchall()}
+
+    cur.execute(
+        """
+        SELECT strftime('%Y-%m', reviewed_at) AS month, COUNT(DISTINCT problem_id) AS count
+        FROM review_logs
+        WHERE reviewed_at >= ? AND reviewed_at <= ?
+        GROUP BY month
+        """,
+        (start_date, today_date),
+    )
+    review_counts = {row["month"]: int(row["count"] or 0) for row in cur.fetchall()}
+
+    return {
+        "labels": labels,
+        "attempts": [attempt_counts.get(key, 0) for key in month_keys],
+        "reviews": [review_counts.get(key, 0) for key in month_keys],
+    }
+
+
 def get_dashboard_summary() -> dict:
     conn = _connect()
     cur = conn.cursor()
@@ -452,6 +556,11 @@ def get_dashboard_summary() -> dict:
         """
     )
     problem_rows = cur.fetchall()
+    trends = {
+        "week": _build_daily_trends(cur, 7),
+        "month": _build_daily_trends(cur, 30),
+        "year": _build_monthly_trends(cur, 12),
+    }
     conn.close()
 
     today = date.today()
@@ -505,6 +614,7 @@ def get_dashboard_summary() -> dict:
         },
         "importance": importance_counts,
         "top_tags": top_tags,
+        "trends": trends,
     }
 
 
@@ -534,6 +644,7 @@ def delete_problem(problem_id: int) -> None:
     cur = conn.cursor()
     cur.execute("DELETE FROM problem_tags WHERE problem_id = ?", (int(problem_id),))
     cur.execute("DELETE FROM attempts WHERE problem_id = ?", (int(problem_id),))
+    cur.execute("DELETE FROM review_logs WHERE problem_id = ?", (int(problem_id),))
     cur.execute("DELETE FROM problems WHERE id = ?", (int(problem_id),))
     conn.commit()
     conn.close()
